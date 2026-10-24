@@ -52,3 +52,50 @@ span.blackback{
     color: #efefef;
 }
 
+/* さくらんぼ型ピンセットのホームページ */
+
+body {
+background-color: #ffe4ec;
+color: #51343d;
+font-family: sans-serif;
+}
+
+header {
+text-align: center;
+margin-bottom: 40px;
+}
+
+h1 {
+font-size: 40px;
+color: #d94f7c;
+text-align: center;
+}
+
+.intro {
+font-size: 18px;
+line-height: 1.8;
+text-align: center;
+}
+
+.content {
+display: flex;
+align-items: center;
+gap: 30px;
+max-width: 900px;
+margin: 30px auto;
+padding: 25px;
+background-color: #fff8fa;
+border-radius: 15px;
+}
+
+.content img {
+width: 45%;
+height: auto;
+border-radius: 10px;
+}
+
+.text {
+flex: 1;
+font-size: 17px;
+line-height: 2;
+}
