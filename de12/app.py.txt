@@ -1,0 +1,398 @@
+import json
+import os
+import secrets
+import unicodedata
+from functools import lru_cache
+from urllib.parse import urlencode
+from urllib.request import urlopen
+
+from flask import Flask, abort, redirect, render_template_string, request, session, url_for
+
+app = Flask(__name__)
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
+
+MEMBERS = ["友達", "先輩・後輩", "恋人"]
+MOODS = ["盛り上がりたい", "しっとり歌いたい", "みんなで歌いたい"]
+RANGES = ["低め", "普通", "高め"]
+
+# 「雰囲気・音域」で曲を分類。各曲の最後は、特に合いそうなメンバー。
+# 音域は選曲用の仮タグ。ここを書き換えると曲を入れ替えられる。
+GROUPS = {
+    ("盛り上がりたい", "低め"): [
+        ("女々しくて", "ゴールデンボンバー", "友達"),
+        ("ガッツだぜ!!", "ウルフルズ", "恋人"),
+        ("リンダリンダ", "THE BLUE HEARTS", "先輩・後輩"),
+    ],
+    ("盛り上がりたい", "普通"): [
+        ("スターマイン", "Da-iCE", "友達"),
+        ("イイじゃん", "M!LK", "先輩・後輩"),
+        ("小さな恋のうた", "MONGOL800", "恋人"),
+    ],
+    ("盛り上がりたい", "高め"): [
+        ("青と夏", "Mrs. GREEN APPLE", "友達"),
+        ("紅蓮華", "LiSA", "恋人"),
+        ("怪獣の花唄", "Vaundy", "先輩・後輩"),
+    ],
+    ("しっとり歌いたい", "低め"): [
+        ("桜坂", "福山雅治", "友達"),
+        ("少年時代", "井上陽水", "恋人"),
+        ("乾杯", "長渕剛", "先輩・後輩"),
+    ],
+    ("しっとり歌いたい", "普通"): [
+        ("虹", "菅田将暉", "友達"),
+        ("奏", "スキマスイッチ", "先輩・後輩"),
+        ("やさしさに包まれたなら", "荒井由実", "恋人"),
+    ],
+    ("しっとり歌いたい", "高め"): [
+        ("First Love", "宇多田ヒカル", "友達"),
+        ("366日", "HY", "先輩・後輩"),
+        ("雪の華", "中島美嘉", "恋人"),
+    ],
+    ("みんなで歌いたい", "低め"): [
+        ("世界に一つだけの花", "SMAP", "恋人"),
+        ("バンザイ〜好きでよかった〜", "ウルフルズ", "先輩・後輩"),
+        ("明日があるさ", "ウルフルズ", "友達"),
+    ],
+    ("みんなで歌いたい", "普通"): [
+        ("チェリー", "スピッツ", "友達"),
+        ("負けないで", "ZARD", "恋人"),
+        ("栄光の架橋", "ゆず", "先輩・後輩"),
+    ],
+    ("みんなで歌いたい", "高め"): [
+        ("残酷な天使のテーゼ", "高橋洋子", "友達"),
+        ("ハナミズキ", "一青窈", "先輩・後輩"),
+        ("世界が終るまでは…", "WANDS", "恋人"),
+    ],
+}
+
+EXTRA_GROUPS = {
+    ('盛り上がりたい', '低め'): [('海の声', '浦島太郎（桐谷健太）', '恋人'), ('愛は勝つ', 'KAN', '先輩・後輩')],
+    ('盛り上がりたい', '普通'): [('サウダージ', 'ポルノグラフィティ', '友達'), ('夏祭り', 'Whiteberry', '恋人')],
+    ('盛り上がりたい', '高め'): [('ライラック', 'Mrs. GREEN APPLE', '友達'), ('新時代', 'Ado', '先輩・後輩')],
+    ('しっとり歌いたい', '低め'): [('糸', '中島みゆき', '恋人'), ('ひまわりの約束', '秦 基博', '友達')],
+    ('しっとり歌いたい', '普通'): [('楓', 'スピッツ', '恋人'), ('カブトムシ', 'aiko', '友達')],
+    ('しっとり歌いたい', '高め'): [('三日月', '絢香', '先輩・後輩'), ('アイノカタチ', 'MISIA', '恋人')],
+    ('みんなで歌いたい', '低め'): [('上を向いて歩こう', '坂本九', '先輩・後輩'), ('日曜日よりの使者', 'THE HIGH-LOWS', '友達')],
+    ('みんなで歌いたい', '普通'): [('空も飛べるはず', 'スピッツ', '恋人'), ('風吹けば恋', 'チャットモンチー', '友達')],
+    ('みんなで歌いたい', '高め'): [('タッチ', '岩崎良美', '先輩・後輩'), ('群青', 'YOASOBI', '友達')],
+}
+MEMBER_ICONS = {"友達": "👥", "先輩・後輩": "🎓", "恋人": "💕"}
+
+SONGS = {}
+for (mood, pitch), group in [*GROUPS.items(), *EXTRA_GROUPS.items()]:
+    for title, artist, member in group:
+        song_id = str(len(SONGS) + 1)
+        SONGS[song_id] = {
+            "id": song_id, "title": title, "artist": artist,
+            "mood": mood, "pitch": pitch, "member": member,
+        }
+
+STEPS = [
+    ("member", "メンバー", "誰と歌う？", MEMBERS),
+    ("mood", "雰囲気", "どんな雰囲気？", MOODS),
+    ("pitch", "音域", "どの音域が歌いやすい？", RANGES),
+]
+
+
+def normalized(value):
+    return "".join(
+        char for char in unicodedata.normalize("NFKC", value).casefold()
+        if char.isalnum()
+    )
+
+
+@lru_cache(maxsize=64)
+def search_music(title, artist):
+    query = urlencode({
+        "term": f"{title} {artist}",
+        "country": "JP",
+        "media": "music",
+        "entity": "song",
+        "limit": 20,
+    })
+    with urlopen("https://itunes.apple.com/search?" + query, timeout=5) as response:
+        tracks = json.load(response).get("results", [])
+
+    for track in tracks:
+        same_title = normalized(track.get("trackName", "")) == normalized(title)
+        same_artist = normalized(track.get("artistName", "")) == normalized(artist)
+        if same_title and same_artist:
+            return track
+    return {}
+
+
+PAGE = """
+<!doctype html>
+<html lang="ja">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>カラオケ曲選</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; padding: 20px; background: #0b0819; color: #fff;
+       font-family: system-ui, sans-serif; }
+main { max-width: 920px; margin: 20px auto; padding: clamp(16px, 4vw, 36px);
+       border: 1px solid #8e58d5; border-radius: 24px; min-height: 460px;
+       background: radial-gradient(ellipse at bottom right, #43134d, #15102b 65%);
+       box-shadow: 0 0 32px #7c2db140; }
+header, .row, .actions { display: flex; gap: 12px; align-items: center;
+                         justify-content: space-between; flex-wrap: wrap; }
+header { padding-bottom: 16px; border-bottom: 2px solid #ce47ff; }
+.brand { font-size: 1.2rem; font-weight: 800; }
+h1 { font-size: clamp(1.6rem, 5vw, 2.5rem); }
+.steps, small { color: #ded0f5; }
+.grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+.row { background: #211738; border: 1px solid #7654a6; border-radius: 14px;
+       padding: 14px; margin: 12px 0; }
+button, .button, .choice { display: inline-flex; align-items: center;
+       justify-content: center; padding: 12px 16px; min-height: 44px;
+       color: white; background: #2e2050; border: 1px solid #a483df;
+       border-radius: 12px; font: inherit; font-weight: 700;
+       cursor: pointer; text-decoration: none; }
+.choice { width: 100%; min-height: 100px; text-align: center; gap: 8px; }
+.choice:has(input:checked) { background: #6422a2; box-shadow: 0 0 14px #cb6fff; }
+.pink { background: #a70d68; border-color: #ff73ca; box-shadow: 0 0 12px #ff4cb44a; }
+.actions { margin-top: 24px; }
+.progress { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+header .progress { margin-left: auto; }
+header > .button { order: 2; }
+.stage { padding: 5px 9px; border: 1px solid #7654a6; border-radius: 20px; font-size: .85rem; }
+.stage.current { background: #a70d68; border-color: #ff73ca; font-weight: 800; }
+.choice { position: relative; flex-direction: column; }
+.choice input { position: absolute; right: 8px; top: 8px; }
+.choice-icon { font-size: 2rem; line-height: 1.2; }
+.step-actions button { margin-left: auto; }
+.song-detail { display: grid; grid-template-columns: minmax(0, 210px) minmax(0, 1fr);
+               gap: clamp(12px, 4vw, 32px); align-items: center; margin-top: 24px; }
+.cover { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 14px; }
+.placeholder { display: grid; place-items: center; background: #6422a2; font-size: 3rem; }
+@media (max-width: 550px) {
+    header .progress { margin-left: 0; }
+    .song-detail { grid-template-columns: minmax(0, 38%) minmax(0, 1fr); }
+}
+.store { color: #f3b9ff; }
+@media (max-width: 550px) {
+    .grid { grid-template-columns: 1fr; }
+    .choice { min-height: 58px; }
+}
+</style>
+
+<main>
+  <header>
+    <span class="brand">♫ カラオケ曲選</span>
+    {% if view in ["results", "detail", "queue"] %}
+      <a class="button pink" href="{{ url_for('queue') }}">歌う候補（{{ kept|length }}）</a>
+    {% endif %}
+    {% if view in ["step", "results", "detail"] %}
+      {% set current = number if view == "step" else 3 %}
+      <nav class="progress" aria-label="選曲の進み具合">
+        {% for label in ["メンバー", "雰囲気", "音域", "おすすめ"] %}
+          {% if not loop.first %}<span aria-hidden="true">→</span>{% endif %}
+          <span class="stage {{ 'current' if loop.index0 == current else '' }}"
+                {% if loop.index0 == current %}aria-current="step"{% endif %}>{{ label }}</span>
+        {% endfor %}
+      </nav>
+    {% endif %}
+  </header>
+
+  {% if view == "step" %}
+    <h1>{{ question }}</h1>
+    <form method="post">
+      <div class="grid">
+        {% for option in options %}
+          <label class="choice">
+            {% if number in [0, 1, 2] %}
+              <svg class="choice-icon" width="34" height="34" viewBox="0 0 24 24"
+     fill="none" stroke="currentColor" stroke-width="1.7"
+     stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  {% if option == "友達" %}
+    <circle cx="8" cy="7" r="3"/>
+    <circle cx="17" cy="8" r="2.5"/>
+    <path d="M2 20v-2a6 6 0 0 1 12 0v2M16 14a5 5 0 0 1 6 5v1"/>
+  {% elif option == "先輩・後輩" %}
+    <path d="M2 9l10-5 10 5-10 5L2 9zM6 11v5c3 3 9 3 12 0v-5M22 9v6"/>
+  {% elif option == "恋人" %}
+    <path d="M12 20 4 12a5 5 0 0 1 8-6 5 5 0 0 1 8 6l-8 8z"/>
+    {% elif option == "盛り上がりたい" %}
+    <path d="m13 2-9 12h7l-1 8 10-12h-7l1-8z"/>
+  {% elif option == "しっとり歌いたい" %}
+    <path d="M20 15.5A8.5 8.5 0 0 1 8.5 4 8.5 8.5 0 1 0 20 15.5z"/>
+  {% elif option == "みんなで歌いたい" %}
+    <rect x="9" y="3" width="6" height="11" rx="3"/>
+    <path d="M6 11v1a6 6 0 0 0 12 0v-1M12 18v3m-3 0h6"/>
+  {% elif option == "低め" %}
+    <path d="M5 20h3v-6H5z"/>
+  {% elif option == "普通" %}
+    <path d="M5 20h3v-6H5zM11 20h3V9h-3z"/>
+  {% elif option == "高め" %}
+    <path d="M5 20h3v-6H5zM11 20h3V9h-3zM17 20h3V4h-3z"/>{% endif %}
+</svg>
+            {% endif %}
+            <input type="radio" name="choice" value="{{ option }}" required
+                   {% if selected == option %}checked{% endif %}>
+            {{ option }}
+          </label>
+        {% endfor %}
+      </div>
+      <div class="actions step-actions">
+        {% if number > 0 %}
+          <a class="button" href="{{ url_for('step', number=number - 1) }}">← 戻る</a>
+        {% endif %}
+        <button class="pink">{{ "曲を探す" if number == 2 else "次へ →" }}</button>
+      </div>
+    </form>
+
+  {% elif view == "results" %}
+    <h1>おすすめの{{ songs|length }}曲</h1>
+    <p class="steps">{{ member }} × {{ mood }} × {{ pitch }}</p>
+    {% for song in songs %}
+      <div class="row">
+        <span><strong>{{ song.title }}</strong><br><small>{{ song.artist }}</small></span>
+        <a class="button" href="{{ url_for('detail', song_id=song.id) }}">詳細</a>
+      </div>
+    {% endfor %}
+    <a class="button" href="{{ url_for('step', number=0) }}">条件を変える</a>
+
+  {% elif view == "detail" %}
+    <div class="song-detail">
+      <div>
+        {% if track.trackViewUrl and track.artworkUrl100 %}
+          <a class="store" href="{{ track.trackViewUrl }}">
+            <img class="cover" src="{{ track.artworkUrl100 }}" alt="ジャケット画像">
+          </a>
+        {% else %}
+          <div class="cover placeholder" aria-hidden="true">♫</div>
+        {% endif %}
+      </div>
+      <div>
+        <h1>{{ track.get("trackName", song.title) }}</h1>
+        <p>{{ track.get("artistName", song.artist) }}</p>
+        <p class="steps">{{ song.mood }} × {{ song.pitch }}</p>
+        {% if track.trackViewUrl %}
+          <a class="store" href="{{ track.trackViewUrl }}">iTunesで曲を見る</a>
+        {% endif %}
+      </div>
+    </div>
+    <div class="actions">
+      <a class="button" href="{{ url_for('results') }}">← 一覧に戻る</a>
+      {% if song.id in kept %}
+        <span class="button pink">追加済み ✓</span>
+      {% else %}
+        <form method="post" action="{{ url_for('keep', song_id=song.id) }}">
+          <button class="pink">＋ 候補に追加</button>
+        </form>
+      {% endif %}
+    </div>
+
+  {% elif view == "queue" %}
+    <h1>歌う候補（{{ kept|length }}）</h1>
+    {% for song in songs %}
+      <div class="row">
+        <span><strong>{{ song.title }}</strong><br><small>{{ song.artist }}</small></span>
+        <form method="post" action="{{ url_for('toggle_favorite', song_id=song.id) }}">
+          <button class="{{ 'pink' if song.id in favorites else '' }}"
+                  aria-pressed="{{ 'true' if song.id in favorites else 'false' }}">
+            {{ "★ 十八番" if song.id in favorites else "☆ 十八番" }}
+          </button>
+        </form>
+      </div>
+    {% else %}
+      <p>気になる曲を詳細画面から追加してね。</p>
+    {% endfor %}
+    <a class="button" href="{{ url_for('results') }}">← おすすめに戻る</a>
+  {% endif %}
+</main>
+</html>
+"""
+
+
+def show(view, **values):
+    return render_template_string(
+        PAGE, view=view, kept=session.get("kept", []), member_icons=MEMBER_ICONS, **values
+    )
+
+
+@app.get("/")
+def home():
+    return redirect(url_for("step", number=0))
+
+
+@app.route("/step/<int:number>", methods=["GET", "POST"])
+def step(number):
+    if number >= len(STEPS):
+        abort(404)
+    for previous in range(number):
+        if STEPS[previous][0] not in session:
+            return redirect(url_for("step", number=previous))
+
+    key, _, question, options = STEPS[number]
+    if request.method == "POST":
+        choice = request.form.get("choice")
+        if choice not in options:
+            abort(400)
+        session[key] = choice
+        if number == len(STEPS) - 1:
+            return redirect(url_for("results"))
+        return redirect(url_for("step", number=number + 1))
+
+    return show("step", number=number, question=question,
+                options=options, selected=session.get(key))
+
+
+@app.get("/results")
+def results():
+    for number, (key, _, _, _) in enumerate(STEPS):
+        if key not in session:
+            return redirect(url_for("step", number=number))
+
+    member, mood, pitch = (session[key] for key in ("member", "mood", "pitch"))
+    matches = [
+        song for song in SONGS.values()
+        if song["mood"] == mood and song["pitch"] == pitch
+    ]
+    matches.sort(key=lambda song: song["member"] != member)
+    return show("results", songs=matches, member=member, mood=mood, pitch=pitch)
+
+
+@app.get("/song/<song_id>")
+def detail(song_id):
+    song = SONGS.get(song_id)
+    if song is None:
+        abort(404)
+    try:
+        track = search_music(song["title"], song["artist"])
+    except (OSError, ValueError):
+        track = {}
+    return show("detail", song=song, track=track)
+
+
+@app.post("/keep/<song_id>")
+def keep(song_id):
+    if song_id not in SONGS:
+        abort(404)
+    kept = session.get("kept", [])
+    if song_id not in kept:
+        session["kept"] = kept + [song_id]
+    return redirect(url_for("detail", song_id=song_id))
+
+
+@app.get("/queue")
+def queue():
+    songs = [SONGS[song_id] for song_id in session.get("kept", []) if song_id in SONGS]
+    return show("queue", songs=songs, favorites=session.get("favorites", []))
+
+
+@app.post("/favorite/<song_id>")
+def toggle_favorite(song_id):
+    if song_id not in SONGS or song_id not in session.get("kept", []):
+        abort(404)
+    favorites = session.get("favorites", [])
+    if song_id in favorites:
+        session["favorites"] = [item for item in favorites if item != song_id]
+    else:
+        session["favorites"] = favorites + [song_id]
+    return redirect(url_for("queue"))
+
+
+if __name__ == "__main__":
+    app.run()

@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>カラオケ曲選</title>
+  <style>
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: #0b091b;
+      color: #faf6ff;
+      font-family: system-ui, sans-serif;
+      line-height: 1.7;
+    }
+
+    main { width: min(94%, 960px); margin: 24px auto 48px; }
+
+    h1 {
+      margin: 0 0 26px;
+      text-align: center;
+      font-size: clamp(2rem, 6vw, 3.5rem);
+    }
+
+    h1::after {
+      content: "";
+      display: block;
+      width: 6em;
+      max-width: 65%;
+      height: 5px;
+      margin: 6px auto 0;
+      border-radius: 8px;
+      background: #ff71bc;
+    }
+
+    .game {
+      overflow: hidden;
+      border: 2px solid #ff89d2;
+      border-radius: 18px;
+      background: #15102b;
+      box-shadow: 0 0 18px #fb46acaa;
+    }
+
+    iframe { display: block; width: 100%; height: 610px; border: 0; }
+
+    .panel {
+      margin-top: 16px;
+      padding: 16px clamp(14px, 3vw, 24px);
+      border: 1px solid #ac86da;
+      border-radius: 14px;
+      background: #17132b;
+    }
+
+    h2 {
+      margin: 0 0 10px;
+      padding-left: 10px;
+      border-left: 5px solid #ff71bc;
+      font-size: 1.35rem;
+    }
+
+    p, ul { margin: 0; }
+    ul { padding-left: 1.5em; }
+    li::marker { color: #ff78c3; }
+    .intro { margin-bottom: 14px; }
+    .changes li + li { margin-top: 16px; }
+
+    summary {
+      cursor: pointer;
+      padding: 8px 12px;
+      border: 1px solid #a887da;
+      border-radius: 9px;
+      background: #362753;
+      font-weight: 700;
+    }
+
+    .comparison {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+      gap: 10px;
+      align-items: center;
+      margin-top: 6px;
+    }
+
+    .comparison > div {
+      overflow: hidden;
+      border: 1px solid #ac86da;
+      border-radius: 8px;
+    }
+
+    .comparison strong {
+      display: block;
+      padding: 4px 10px;
+      background: #362753;
+    }
+
+    pre {
+      margin: 0;
+      padding: 9px 10px;
+      overflow: auto;
+      color: #ffc0e4;
+      background: #100e21;
+    }
+
+    details pre { max-height: 480px; margin-top: 10px; }
+
+    @media (max-width: 580px) {
+      .comparison { grid-template-columns: 1fr; }
+      .arrow { justify-self: center; transform: rotate(90deg); }
+      iframe { height: 690px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>カラオケ曲選</h1>
+
+    <div class="game">
+      <iframe src="http://127.0.0.1:5000/" title="カラオケ曲選のゲーム画面"></iframe>
+    </div>
+
+    <section class="panel">
+      <h2>制作理由</h2>
+      <p>友達や先輩とカラオケに行く際、何を歌えばよいか悩んだり、その場の雰囲気に合った曲を選ぶのが難しいと感じたりする人も多いのではないでしょうか。そこで、一緒にいる人やその場の雰囲気、自分に合った音域を選択するだけで、条件に適した曲を自動で提案してくれるツールがあれば便利だと考え、制作しました。</p>
+    </section>
+
+    <section class="panel">
+      <h2>使用したAPI</h2>
+      <p>iTunes Search APIを使いました。おすすめ曲の「詳細」を開くと、曲名とアーティスト名で検索し、取得できたジャケット画像やiTunesへのリンクを表示します。おすすめ曲の選定は、メンバー・雰囲気・音域に応じてPythonで行っています。</p>
+    </section>
+
+    <section class="panel">
+      <h2>こだわりポイント</h2>
+      <ul>
+        <li>デザインをカラオケのデンモク風になるように工夫した</li>
+        <li>「十八番ボタン」を配置し、自分の得意な曲をひと目で確認できるようにしてみた</li>
+      </ul>
+    </section>
+
+    <section class="panel">
+      <h2>ソースコード</h2>
+      <details>
+        <summary>app.py を表示</summary>
+        <pre><code id="python-source">読み込み中…</code></pre>
+      </details>
+    </section>
+
+    <section class="panel">
+      <h2>改良した点</h2>
+      <p class="intro">最初に作成したコードをもとに実際に操作してみたところ、いくつか改善すべき点が見つかった。</p>
+
+      <ul class="changes">
+        <li>
+          デンモク風の画面にした
+          <div class="comparison">
+            <div>
+              <strong>改良前</strong>
+              <pre><code>&lt;p class="steps"&gt;メンバー → 雰囲気 → 音域 → おすすめ&lt;/p&gt;</code></pre>
+            </div>
+            <span class="arrow" aria-hidden="true">→</span>
+            <div>
+              <strong>改良後</strong>
+              <pre><code>.stage.current {
+  background: #a70d68;
+  border-color: #ff73ca;
+  font-weight: 800;
+}</code></pre>
+            </div>
+          </div>
+        </li>
+
+        <li>
+          「十八番ボタン」を付けた
+          <div class="comparison">
+            <div>
+              <strong>追加前の状態</strong>
+              <pre>候補一覧に曲名とアーティスト名を表示</pre>
+            </div>
+            <span class="arrow" aria-hidden="true">→</span>
+            <div>
+              <strong>追加後</strong>
+              <pre><code>{{ "★ 十八番" if song.id in favorites else "☆ 十八番" }}</code></pre>
+            </div>
+          </div>
+        </li>
+
+        <li>
+          最初の「次へ」ボタンを右に揃えた
+          <div class="comparison">
+            <div>
+              <strong>改良前</strong>
+              <pre><code>&lt;div class="actions"&gt;</code></pre>
+            </div>
+            <span class="arrow" aria-hidden="true">→</span>
+            <div>
+              <strong>改良後</strong>
+              <pre><code>&lt;div class="actions step-actions"&gt;
+
+.step-actions button {
+  margin-left: auto;
+}</code></pre>
+            </div>
+          </div>
+        </li>
+
+        <li>
+          曲の詳細画面で、ジャケットを左に大きく置き、右に曲情報を並べた
+          <div class="comparison">
+            <div>
+              <strong>改良前</strong>
+              <pre><code>.cover {
+  width: 120px;
+  height: 120px;
+}</code></pre>
+            </div>
+            <span class="arrow" aria-hidden="true">→</span>
+            <div>
+              <strong>改良後</strong>
+              <pre><code>.song-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 210px) minmax(0, 1fr);
+}</code></pre>
+            </div>
+          </div>
+        </li>
+      </ul>
+    </section>
+  </main>
+
+  <script>
+    const source = document.getElementById("python-source");
+
+    fetch("./app.py.txt")
+      .then(response => {
+        if (!response.ok) {
+          throw new Error("ソースコードを読み込めませんでした");
+        }
+        return response.text();
+      })
+      .then(code => {
+        source.textContent = code;
+      })
+      .catch(() => {
+        source.textContent = "app.py.txt を 4.html と同じフォルダに置いてください。";
+      });
+  </script>
+</body>
+</html>
